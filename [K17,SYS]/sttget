@@ -1,0 +1,316 @@
+COMMENT ⊗   VALID 00002 PAGES
+C REC  PAGE   DESCRIPTION
+C00001 00001
+C00002 00002	title STTGET
+C00011 ENDMK
+C⊗;
+title STTGET
+subttl Statistics gathering service
+
+nbufs←←3	; Number of buffers
+
+INIBYT←←(11+1)/2;11 BYTES PER JOB 18 BITS PER BYTE
+
+;JOB TABLE POINTERS FOR INTIALIZING STATS
+JOBN←←400222
+JBTSTS←←400210
+	JNA←←40000
+	SWP←←2000
+JBTADR←←400223
+JOBQUE←←400231
+JBTSIN←←400307
+JBTGLU←←400310
+SPWGO←←400213
+SP2GO←←400230
+JOBNAM←←400225
+JBTSWP←←400212
+
+DEFINE XD(A,B)
+<A←←B>
+
+;STAT OP-CODES
+XD CSZSTA,000000		;BYTE(1)0(3)0(8)HIGH ORDER BITS OF CORE SIZE(6)J#
+XD CPSSTA,040000		;BYTE(1)0(3)1(8)HIGH ORDER BITS OF CORE POSITION(6)J#
+XD NAMSTA,400000		;BYTE(1)1(5)0(6)UNUSED(6)J#
+				;FOLLOWING TWO 18 BIT BYTES ARE JOBNAME
+XD QUESTA,410000		;BYTE(1)1(5)1(6)QUEUE CODE(6)J#
+XD SINSTA,420000		;BYTE(1)1(5)2(6)JBTSIN BIT #(6)J#
+XD SEGSTA,430000		;BYTE(1)1(5)3(6)SEGMENT #(6)J#
+XD SPWSTA,440000		;BYTE(1)1(5)4(6)0-17:TICS OF SPW, 77:SPW OFF(6)J#
+XD GLUSTA,450000		;BYTE(1)1(5)5(6)JBTGLU COUNT(6)J#
+XD LOKSTA,460000		;BYTE(1)1(5)6(6)1:LOCKING, 0:UNLOCKING(6)J#
+
+stat←←400241		; Address of statistics table
+sttlen←←400243		; Length of such
+sttptr←←400244		; Address of statistics pointer
+sttnum←←400245		; Address of wrap-around COUNTER
+
+t←←12
+t1←←13
+t2←←14
+T3←15
+T4←16
+J←17
+
+external jobapr
+
+START:	RESET
+	MOVSI T,376001			;128K CORE STARTING AT BOTTOM (WRITE PROTECTED)
+	SETPR2 T,			;SET IT AS UPPER
+	JRST [	OUTSTR[ASCIZ/SETPR2 FAILED!
+/]
+		EXIT]
+	SKIPN STAT
+	JRST [	OUTSTR[ASCIZ/SORRY, THIS SYSTEM DOESN'T HAVE ANY STATISTICS INFO!
+/]
+		EXIT]
+	init 1,17
+	sixbit /DSK/
+	0
+	jrst [	outstr [asciz ⊗Can't INIT disk
+⊗]
+		EXIT]
+	setzm efile+3
+	hllzs efile+1
+	setzm efile+2
+	enter 1,efile
+	jrst [	outstr [asciz ⊗Can't ENTER file
+⊗]
+		EXIT]
+	hrrzi t,ints
+	movem t,jobapr
+	setzm nbufo
+	movei t,buff
+	movem t,iptr
+	movem t,optr
+	setzm lose
+FOR @! I IN(JBTSTS,JBTADR,JOBQUE,JBTSIN,JBTGLU,SPWGO,SP2GO,JOBNAM,JBTSWP)
+<	MOVE T,I
+	ADDI T,400000
+	HRRM T,$!I
+>
+	SETOM FIRST#
+TRYINI:	MOVE T,JOBN
+	SUBI T,1
+	IMULI T,INIBYT
+	ADD T,JOBFF↑
+	CORE T,
+	JRST [	OUTSTR[ASCIZ/CAN'T GET CORE FOR INITIALIZATION!
+/]
+		CALLI 1,12
+		JRST TRYINI]
+	MOVE T,JOBFF
+	SETZM (T)
+	MOVE T1,T
+	HRL T,T
+	ADDI T,1
+	MOVE T1,JOBN
+	SUBI T1,1
+	IMULI T1,INIBYT
+	ADD T1,JOBFF
+	BLT T,(T1)
+	PJOB T1,
+	MOVEM T1,JOB#
+	HRLZM T1,@JOBFF
+	LOCK T,
+	movei t2,1
+	INTENB T2,
+	IWKMSK [1]
+	clkint 1,1		;EVERY TIC ON PDP-10
+	IWAIT			;WAIT FOR INITIALIZATION TO FINISH
+	MOVN T,JOBN
+	ADDI T,1
+	IMULI T,INIBYT
+	SUBI T,1
+	HRLZ T,T
+	HRR T,JOBFF
+	SUBI T,1
+	SETZ T1,
+	OUTPUT 1,T
+loop:	INCHRS T
+	JRST LOOP0
+	EXIT
+
+LOOP0:	MTAPE 1,['GODMOD'
+		17]		;MAKE SURE FILE IS UPDATED
+	IWAIT
+loop1:	skipg t,nbufo
+	jrst loop
+	sos nbufo
+	caile t,nbufs
+	jrst [	outchr ["X"]
+		output 1,[iowd 200,mones↔0]
+		jrst loop2]
+	hrrz t,optr
+	subi t,1
+	hrrm t,oiowd
+	output 1,oiowd
+loop2:	movei t,200
+	addb t,optr
+	caige t,buff+nbufs*200
+	jrst loop1
+	movei t,buff
+	movem t,optr
+	jrst loop1
+
+INTS:	SKIPN FIRST
+	JRST INTS1
+	SETZM FIRST
+	MOVE T2,JOBFF
+	HRLI T2,(<POINT 18,0,17>);SKIP OVER OUR JOB #
+	MOVEI J,1
+INI0:
+$JBTSTS:MOVE T1,JBTSTS(J)
+	CAME J,JOB		;SKIP US
+	TLNN T1,JNA
+	JRST INI1
+	TLNE T1,SWP
+	TDZA T,T
+$JBTADR:HRRZ T,JBTADR(J)
+	LSH T,-4
+	TRO T,CPSSTA(J)
+	IDPB T,T2
+	HLRZ T,@$JBTADR
+	LSH T,-=10
+	ADDI T,1
+	TLNE T1,SWP
+	LDB T,$JBTSWP
+	LSH T,6
+	TRO T,CSZSTA(J)
+	IDPB T,T2
+$JBTSIN:HLLZ T,JBTSIN(J)
+	JRST INI2
+$JBTSWP:POINT 8,JBTSWP(J),35	;IMGIN
+
+INI3:	MOVN T3,T1
+	MOVSI T4,400000
+	LSH T4,(T3)
+	TDZ T,T4
+	LSH T1,6
+	TRO T1,SINSTA(J)
+	IDPB T1,T2
+INI2:	JFFO T,INI3
+$JBTGLU:MOVE T,JBTGLU(J)
+	ANDI T,77
+	LSH T,6
+	TRO T,GLUSTA(J)
+	IDPB T,T2
+$SPWGO:	SKIPN SPWGO(J)
+	JRST INI4
+	LDB T,[POINT 12,@$SPWGO,23]
+	ANDI T,7700
+	TRO T,SPWSTA(J)
+	IDPB T,T2
+INI4:
+$SP2GO:	SKIPN SP2GO(J)
+	JRST INI5
+	LDB T,[POINT 12,@$SP2GO,23]
+	ANDI T,7700
+	TRO T,SPWSTA+4000(J)
+INI5:	HRRZ T,@$JBTSTS
+	ANDI T,77
+	LSH T,6
+	TRO T,SEGSTA(J)
+	IDPB T,T2
+	MOVEI T,NAMSTA(J)
+	IDPB T,T2
+$JOBNAM:MOVS T,JOBNAM(J)
+	IDPB T,T2
+	HLRZ T,T
+	IDPB T,T2
+$JOBQUE:MOVM T,JOBQUE(J)
+	ANDI T,77
+	LSH T,6
+	TRO T,QUESTA(J)
+	IDPB T,T2
+INI1:	CAMGE J,JOBN
+	AOJA J,INI0
+;INIT POINTERS
+	move t,sttptr
+	move t,400000(t)
+	hrrzi t,1(t)
+	sub t,stat
+	ori t,177
+	subi t,177
+	add t,stat
+	movem t,sttpt
+	addi t,200
+	move t1,stat
+	add t1,sttlen
+	movem t1,sttend
+	setzm sttn
+	camge t,t1
+	jrst ints4
+	aos sttn
+	move t,stat
+ints4:	movem t,sttyet
+	move t,sttnum
+	move t,400000(t)
+	addm t,sttn
+;INIT DONE
+	movei t,1
+	INTGEN T,		;TELL HIM TO GO
+	DISMIS
+
+ints1:	move t,sttptr
+	hrrz t,400000(t)
+	addi t,1
+	camge t,sttyet
+	DISMIS
+	hrr t,sttnum
+	move t,400000(t)
+	camge t,sttn
+	DISMIS
+	came t,sttn
+	aos lose
+	hrr t,sttpt
+	HRLI T,400000(T)
+	hrr t,iptr
+	hrrz t1,iptr
+	addi t1,177
+	blt t,(t1)
+	movei t,200
+	addb t,iptr
+	caige t,buff+nbufs*200
+	jrst ints2
+	movei t,buff
+	movem t,iptr
+ints2:	aos nbufo
+	movei t,1
+	INTGEN T,
+	move t,sttyet
+	movem t,sttpt
+	addi t,200
+	camge t,sttend
+	jrst ints3
+	aos sttn
+	move t,stat
+ints3:	movem t,sttyet
+	jrst ints1
+
+; Data storage . . .
+
+mones:	-1
+	-1
+	-1
+	-1
+lose:	0
+sttend:	0		; First address beyond table
+
+sttn:	0		; Trigger value of wrap-around pointer
+sttpt:	0		; Last pointer to 200-wd block
+sttyet:	0		; Place where pointer has to be to trigger transfer of 200-wds
+
+nbufo:	0		; Counter of number of full buffers
+iptr:	buff		; Load-up pointer
+optr:	buff		; Empty pointer
+buff:	block 200*nbufs
+oiowd:	iowd 200,buff
+	0
+
+efile:	sixbit /STATS/
+	sixbit /DAT/
+	0
+	0
+
+end start

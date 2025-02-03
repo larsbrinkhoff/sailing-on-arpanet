@@ -1,0 +1,762 @@
+COMMENT ⊗   VALID 00018 PAGES
+C REC  PAGE   DESCRIPTION
+C00001 00001
+C00003 00002	IFN ELFNUM <SUBTTL ELFSER	PDP-11 SERVICE
+C00005 00003	10/11 interface definitions
+C00008 00004	Console control box definitions
+C00010 00005	SPS41 definitions
+C00011 00006	Service dispatch table, DDB definitions
+C00013 00007	System initialization, interrupt code, RELEAS, hung code.
+C00017 00008	Dump-mode I/O: ELFDOU, ELFDIN
+C00020 00009	MTAPE UUO calling sequence and dispatch, SETIOS routine.
+C00023 00010	USETI, USETO, UGETF UUO's
+C00025 00011	MTAPE's: INTWAI, PEEK
+C00029 00012	MTAPE FILL
+C00031 00013	Funny MTAPE functions: EXAMINE, DEPOSIT, REG EXAM, REG DEP, PROGRAM START
+C00033 00014	Read routines: RDB, RDW
+C00036 00015	Write routines: WTB, WTW, POKE11
+C00038 00016	Common subroutines for RDB and WTB: RELIOW, UPDADR
+C00041 00017	Common routines: WDONE, DOCON
+C00044 00018		USET,SETCON, DLAY
+C00046 ENDMK
+C⊗;
+IFN ELFNUM <SUBTTL ELFSER	PDP-11 SERVICE
+BEGIN ELFSER - 15 MAY 74 - BO
+
+CBOX←←0		;Nonzero if the control box exists
+SPS41←←0	;SPS exists, but we don't have anything to do with it yet.
+NEWCNI←←0	;1 when Rubin installs the BUS INIT CONI bit.
+
+IFNDEF DBG11 <DBG11←←0>		;Nonzero for debugging in user-IOT mode.
+
+COMMENT⊗	DEVIOS bits
+
+18 IOIMPM
+19 IODERR	Interface detected an error
+20 IOBKTL	ADRS ERR from an EXAMINE or DEPOSIT.
+
+21 IODEND	Interface got NXM
+22		Interface couldn't get the bus
+23 IOACT
+
+24		BUS INIT going on (NEWCNI)
+25		Bad parity
+26		Interface is hung
+
+27
+28		Interface still has the UNIBUS (grab mode)
+29		No retry on errors.
+
+30 IOCON
+31 IOWC
+
+32:35 MODE	Modes 16-17 are legal.
+
+Bit 19 is set by the interrupt routine.
+
+Bits 20:22 and 24:29 are set (from a CONI) at the end of each dump-mode
+transfer.  All of these bits are for the user's information only - they
+don't affect the operation of the interface.
+⊗
+
+HNGBIT←←1000
+NOTRY←←100
+INTREQ←←400000		;Attention bit in LH(DEVIOS)
+;10/11 interface definitions
+
+;CONO bits
+
+SETADR←←400000		;If 1, set address from bits 19:35.
+			;If 0, the other bits have these meanings:
+
+IRESET←←100000		;Reset the interface
+CLRINT←←40000		;Clear the interrupt conditions
+IGNPAR←←20000		;Ignore parity on input
+STOPIT←←10000		;Stop data transfers
+DOIT←←4000		;Start data transfers
+WRITE←←2000		;0 ⊃ read, 1 ⊃ write
+GRAB←←1000		;Don't let go of the bus
+SGNEXT←←400		;Extend sign of inputs
+;	Data packing mode:
+  ONEWD←←0		;16 bits right-adjusted in a word
+  TWOWD←←100		;16 bits right-adj in each halfword
+  TWOWDR←←200		;32 bits right-adjusted
+  TWOWDL←←300		;32 bits left-adjusted
+;	Bits 30-32 are the PI channel for special interrupts,
+SCHN←←ELFCHN⊗3
+;	33-35 the channel for data transfer interrupts.
+DCHN←←ELDCHN
+
+;CONI bits, left half
+
+SPINT←←400000		;Special interrupt (reason in bits 18-23)
+;	Bits 1:17 are the contents of the Unibus address register.
+
+
+;CONI bits, right half
+
+IREQ←←400000		;The 11 requested an interrupt
+;	Errors in the data transfer:
+ADRERR←←200000		;ADRS ERR from a console operation
+			;(set by software, not a CONI)
+NXM11←←100000		;No response to the address from the bus
+BUSTO←←40000		;Couldn't get the bus
+BINIT←←20000		;BUS INIT in progress
+PARBAD←←10000		;Bad parity
+;	Status of current transfer:
+BUSY←←4000		;Working on it
+DONE←←2000		;This causes a Data Transfer interrupt.
+;	Bits 26:35 (from GRAB on) are the same as set in the
+;	last CONO.
+
+NTRY←←=10		;No. of retries for BUSTO or hung interface
+;Console control box definitions
+
+HCOR←←100000		;First NXM address in the 11.
+
+IFN CBOX <	These locations are on the Unibus.
+
+DEFINE WADDR(ADR){ADR⊗-1}	;Translate byte to word address
+
+CREG←←WADDR(777170)	;Comm register 1
+IREG←←WADDR(777172)	;Comm register 2 (causes IREQ when written)
+SREG←←WADDR(777174)	;Switches 15:00 (write), data lights (read)
+FREG←←WADDR(777176)	;Function register
+
+;FREG bits:	15:14 (w) switch register 17:16
+;		12:11 (w) address display mode
+			PPHY←←00000
+			KRND←←04000
+			KRNI←←10000
+			CPHY←←14000
+			SUPD←←20000
+			SUPI←←24000
+			USRD←←30000
+			USRI←←34000
+
+;		5 (w) S-INST/S-CYCLE
+			SINST←←00
+			SCYCL←←40
+
+;		4 (w) HALT/ENABLE
+			ENABL←←00
+			HALT ←←20
+
+;		3:0 (pw) spring-loaded switches
+			LADR ←←01
+			EXAM ←←02
+			DEP  ←←03
+			REXAM←←04
+			RDEP ←←05
+			START←←06
+			CONT ←←07
+			INT4 ←←10
+			INT5 ←←11
+			INT6 ←←12
+			INT7 ←←13
+
+;		Bit 0 (r) ADRS ERR
+			ADRERR←←1
+
+PSWD←←WADDR(777776)	;Program Status word
+STKLIM←←WADDR(777774)	;Kernel stack limit
+
+>;IFN CBOX
+;SPS41 definitions
+
+IFN SPS41 <
+
+MCR0←←WADDR(765000)		;Bit function if 1 (write):
+
+	EXT←←2		;IOP external
+	WBE←←4		;Enable writes into memories
+	PMENB←←10	;Enable writes into program memories
+	CHNENB←←20	;Enable channels 1-17
+	ISINT←←40	;IS internal
+	INIT←←1000	;Initialize all interfaces, halt the IS
+
+	EXTERN←←EXT+WBE+PMENB+CHNENB
+	INTERN←←WBE+PMENB+CHNENB+ISINT
+
+MCR1←←MCR0 + 1
+
+	COFF←←1		;Master clock off (stop)
+	ENAB←←2		;Enable Unibus access to box memories
+
+	STOP41←←COFF+ENAB
+
+MCR2←←MCR1 + 1
+
+	ONESTP←←1	;Single step anything in internal mode
+
+MCR3←←MCR2 + 1
+>;IFN SPS41
+;Service dispatch table, DDB definitions
+
+	JRST ELFINI		;Initialization
+	JRST ELFHNG		;Hung
+↑ELFDSP:
+	JRST ELFREL		;Release
+	POPJ P,			;Close
+	JRST UUOERR		;Out UUO
+	JRST UUOERR		;In UUO
+	JRST CPOPJ1		;Enter
+	JRST CPOPJ1		;Lookup
+	JRST ELFDOU		;Dump-mode output
+	JRST ELFDIN		;Dump-mode input
+	JRST ELFUSO		;USETO
+	JRST ELFUSI		;USETI
+	JRST ELFGTF		;UGETF
+	JRST CPOPJ1		;RENAME
+	POPJ P,			;Close input
+	POPJ P,			;UTPCLR
+	JRST ELFMTA		;MTAPE
+
+;Locations in the DDB, starting at ELFLOC
+
+DEFINE D(X) {X←L↔L←←L+1}
+L←←ELFLOC-ELFDDB
+
+D INTCNI	;CONI from interrupt routine
+D USOUT		;<output CONO>,,<output bus address>
+D USIN		;<input CONO>,,<input bus address>
+D UIOWD		;User's IOWD, in case of shuffling during BUS INIT wait.
+;System initialization, interrupt code, RELEAS, hung code.
+
+;First UUO after INIT will call ELFINI to set the default values of the USET's.
+
+ELFIN0:	MOVEM	IOS,DEVIOS(DDB)			;Special entry for USET and UGETF.
+ELFREL:						;RELEAS re-initializes.
+ELFINI:	CONO	D11,IRESET+CLRINT		;Make sure no interrupts can happen.
+	MOVE	TAC,[XWD DOIT+SCHN,SETADR]	;Set up the USET words to the
+	MOVEM	TAC,USIN(DDB)			;default mode.
+	MOVE	TAC,[XWD WRITE+DOIT+SCHN,SETADR]
+	MOVEM	TAC,USOUT(DDB)
+	POPJ	P,
+
+
+ELFCLS:	CONO	D11,STOPIT+SCHN		;MTAPE 4 turns off GRAB mode.
+	CONI	D11,TEM			;(used to be CLOSE until JBR
+	TRZ	TEM,GRAB		;found a problem with that).
+	MOVEI	IOS,200
+	ANDCAB	IOS,DEVIOS(DDB)
+	JRST	CPOPJ1
+
+IFE DBG11 <
+;Special interrupt - error or IREQ
+
+↑ELFINT:
+	JSR	ELFSAV			;Get some AC's
+	MOVEI	DDB,ELFDDB
+	MOVE	DAT,DEVMOD(DDB)
+	TRNE	DAT,ASSPRG		;Is the interface INITed?
+	JRST	ELFIN1
+	CONO	D11,IRESET+CLRINT	;No.  Ignore the spurious interrupt,
+	POPJ	P,			;fix it so it won't happen again.
+
+ELFIN1:	CONI	D11,INTCNI(DDB)
+	CONO	D11,CLRINT+SCHN		;clear the interrupt condition.
+
+IFN CBOX <
+	MOVE	DAT,INTCNI(DDB)		;Save the status for the I/O routine.
+	TRNN	DAT,IREQ		;Did the 11 request this interrupt?
+	POPJ	P,			;No.  There must be a transfer in progress.
+					;The I/O routine will notice that BUSY and
+					;DONE are clear.
+	MOVSI	IOS,DEVSBB
+	ANDCA	IOS,DEVIOS(DDB)		;Clear the I/O active indicator,
+	TLO	IOS,INTREQ		;set flag saying this interrupt happened.
+	LDB	J,PJOBN
+	TLZE	IOS,IOW			;Is the job waiting for this interrupt?
+	PUSHJ	P,SETIOD		;Yes.  Let it continue.
+	MOVEM	IOS,DEVIOS(DDB)
+>;IFN CBOX
+	POPJ	P,
+>;IFE DBG11
+
+;Hung timeout
+
+IFN CBOX <
+ELFHNG:	CONO	PI,ELFOFF	;Prevent interference from interrupt routine.
+	TLZ	IOS,DEVSBB
+	TLZE	IOS,IOW		;If the job was waiting for an interrupt,
+	PUSHJ	P,SETIOD	;let it run.
+	MOVEM	IOS,DEVIOS(DDB)
+	CONO	PI,ELFON
+	JRST	CPOPJ1
+>;CBOX
+IFE CBOX <ELFHNG: POPJ P,>
+;Dump-mode I/O: ELFDOU, ELFDIN
+
+ELFDOU:	TLZE IOS,IOBEG
+	PUSHJ P,ELFINI
+	MOVE TAC,USOUT(DDB)
+	XCTR XR,[MOVE DAT,(UUO)]
+	PUSHJ P,WTB
+	JFCL			;LET USER INSPECT FAILING STATUS
+	TLO TEM,SETADR
+	HLRM TEM,USOUT(DDB)
+	JRST SETIOS
+
+ELFDIN:	TLZE IOS,IOBEG
+	PUSHJ P,ELFINI
+	MOVE TAC,USIN(DDB)
+	XCTR XR,[MOVE DAT,(UUO)]
+	PUSHJ P,RDB
+	JFCL
+	TLO TEM,SETADR
+	HLRM TEM,USIN(DDB)
+	JRST SETIOS
+;MTAPE UUO calling sequence and dispatch, SETIOS routine.
+
+COMMENT⊗	Calling sequence:
+
+	MTAPE CHN,ADR
+	<error return>
+	<success return>
+
+ADR:	BYTE (9)CODE,MODE(18)BUSADR
+	<data>
+
+CODE specifies the function.  MODE and BUSADR work the same way as in USETI.
+<data> is either the thing to be sent or the result that is read.
+⊗
+
+;Dispatch table
+
+IFE CBOX <MTMIN←←1
+	MTTBL←.-MTMIN>
+IFN CBOX <MTMIN←←0
+MTTBL:	MTP0>
+	FILL11
+	PEEK11
+	POKE11
+	ELFCLS
+IFN CBOX <	EXAMI
+		DEPOS
+		REXAMI
+		RDEPOS>
+MTMAX←←.-MTTBL
+
+ELFMTA:	TLZE	IOS,IOBEG
+	PUSHJ	P,ELFINI
+	XCTR	XR,[MOVE TAC1,(UUO)]	;Get the code word,
+	LDB	TAC,[POINT 9,TAC1,8]	;Pull out the function code.
+	IOR	TAC1,[XWD SETADR,SETADR];fix it so SETCON does the right thing.
+IFN MTMIN <CAIL TAC,MTMIN>
+	CAILE	TAC,MTMAX
+	JRST	UUOERR			;Out of bounds is an illegal UUO.
+	PUSHJ	P,@MTTBL(TAC)		;Do your thing,
+	CAIA
+	AOS	(P)
+
+SETIOS:	MOVEM	IOS,DEVIOS(DDB)
+	MOVEI	IOS,0			;Set up the resulting IOS bits...
+	LDB	AC1,[POINT 3,TEM,21]	;NXM, BUSTO
+	DPB	AC1,[POINT 3,IOS,22]
+	TRZ	TEM,DONE
+	LDB	AC1,[POINT 5,TEM,26]	;PARBAD, BUSY, GRAB.
+	DPB	AC1,[POINT 5,IOS,28]
+	TRNE	TEM,NXM11+BUSTO+PARBAD+BUSY+ADRERR
+	TRO	IOS,IODERR		;OR the bad ones into IODERR.
+	IORB	IOS,DEVIOS(DDB)
+	POPJ	P,
+;USETI, USETO, UGETF UUO's
+
+COMMENT⊗
+	UGETF CHN,ADR
+	<always returns here>
+
+ADR:	<USETI word>	;Returns results here in the right format for
+	<USETO word>	;a subsequent USET to use.
+⊗
+
+ELFGTF:	TLZE IOS,IOBEG
+	PUSHJ P,ELFIN0
+	MOVE TAC,USIN(DDB)
+	PUSHJ P,GETF
+	MOVE TAC,USOUT(DDB)
+
+GETF:	LDB TAC1,[POINT 4,TAC,11]
+	TLNE TAC,IGNPAR
+	TRO TAC1,20
+	MOVS TAC1,TAC1
+	TLO TAC1,400000
+	HRR TAC1,TAC
+	XCTR XW,[MOVEM TAC1,(UUO)]
+	AOS UUO
+	POPJ P,
+
+COMMENT⊗
+	USETI CHN,ADR or USETO CHN,ADR
+	<always returns here>
+
+ADR:	XWD MODE,BUSADR
+
+If bit 0 of C(ADR) is on, sets the data transfer mode for the corresponding
+direction of transfer from bits 13:17 (IGNPAR, GRAB, SGNEXT, packing mode).
+If bit 18 is one, sets the bus address for the next dump-mode transfer from
+bits 19:35.  This address gets updated at the end of each block transfer
+to point to the next word after the block.
+⊗
+
+ELFUSI:	TLZE IOS,IOBEG
+	PUSHJ P,ELFIN0
+	MOVE TAC,USIN(DDB)
+	PUSHJ P,USET
+	MOVEM TAC,USIN(DDB)
+	POPJ P,
+
+ELFUSO:	TLZE IOS,IOBEG
+	PUSHJ P,ELFIN0
+	MOVE TAC,USOUT(DDB)
+	PUSHJ P,USET
+	MOVEM TAC,USOUT(DDB)
+	POPJ P,
+;MTAPE's: INTWAI, PEEK
+
+;MTAPE opcode 0: INTWAIT.  If the elf has requested an interrupt,
+;do a PEEK CREG.  Otherwise:
+;If bits 30:35 of the instruction are 0, direct return with no errors indicated.
+;If bits 30:35 = 77, go into IOWQ until the elf interrupts, then PEEK CREG.
+;Other bit combinations: set the hung timer to that many seconds, go into
+;IOWQ until it interrupts or the time runs out.  If the interrupt happens,
+;do a PEEK CREG; if it times out, take the direct return with the HUNG DEVIOS
+;bit on.
+
+IFN CBOX <
+MTP0:	TLZE	IOS,INTREQ	;Has it interrupted?
+	JRST	INTIN		;Yes.  Do the peek.
+	MOVEI	TEM,0		;No.  Clear error return bits in case...
+	TRCN	TAC1,77		;Does he want to wait?
+	POPJ	P,		;No wait.  Just return.
+	TRCN	TAC1,77		;He does.  Did he specify infinite time?
+	TRZ	TAC1,77		;Yes.  Clear the hung timer.
+	DPB	TAC1,PDVCNT	;No.  Set the hung timer.
+	CONO	PI,ELFOFF	;Avoid interference...
+	MOVE	IOS,DEVIOS(DDB)	;make sure the interrupt hasn't happened.
+	TLZE	IOS,INTREQ
+	JRST	INTIN0
+	MOVSI	IOS,DEVSBB	;OK, we're sure now.
+	IORM	IOS,DEVIOS(DDB)	;Set the I/O busy indicator,
+	CONO	PI,ELFON
+	PUSHJ	P,WSYNC		;wait until something happens.
+
+	MOVEI	TEM,0		;We wake up.  Clear the error indications.
+	MOVE	IOS,DEVIOS(DDB)
+	TLZE	IOS,INTREQ	;Did the desired interrupt happen?
+	JRST	INTIN
+	TRO	IOS,HNGBIT	;No.  The hung time ran out.
+	POPJ	P,
+
+INTIN0:	CONO	PI,ELFON
+INTIN:	HRRI	TAC1,SETADR+CREG;Set up a PEEK CREG.
+	TLNN	TAC1,TWOWDL
+	TLO	TAC1,TWOWD	;Fall into the PEEK routine.
+>;IFN CBOX
+
+;Peek at one or two words in the 11's memory.
+
+PEEK11:	MOVSI	TAC,DOIT+SCHN		;Set up the CONO.
+	PUSHJ	P,SETCON
+	PUSHJ	P,RDW			;Read one word in the specified mode.
+	POPJ	P,			;Error return.
+	XCTR	XW,[MOVEM DAT, 1(UUO)]	;Success.  Give it to the user.
+	JRST	CPOPJ1
+;MTAPE FILL
+
+;Fill a block with a constant
+
+FILL11:	TLZ TAC1,3			;Packing mode 0 (ONEWD)
+	MOVSI TAC,WRITE+DOIT+SCHN	;Set up the initial CONO.
+	PUSHJ P,SETCON
+	XCTR XR,[MOVE DAT,1(UUO)]	;LH(DAT)=# of words, RH=thing to fill with.
+	MOVE AC2,[XWD -NTRY,FILLR]	;Set up the retry address.
+FILL0:	HLRZ TAC1,DAT
+	JUMPE TAC1,CPOPJ1
+FILL1:	PUSHJ P,DOCON			;Start the interface in write mode.
+FILL2:	CONSO D11,DONE
+	JSP AC1,WDONE
+	DATAO D11,DAT			;When ready, write the data.
+	SOJG TAC1,FILL2			;Repeat until the block is filled.
+	JRST WTBE			;End just like any write.
+
+FILLR:	AOJ TAC1,			;Retry needed.  Back up the count.
+	MOVS TAC1,TAC1
+	HRR TAC1,DAT
+	CAMN DAT,TAC1			;Did any data go through successfully?
+	JRST FILL0
+	SUB TAC1,DAT			;Yes.  Update the count of words
+	ADD DAT,TAC1			;remaining,
+	MOVN TAC1,TAC1
+	MOVS TAC1,TAC1
+	ADD TAC1,TAC			;move the bus address up to the one
+	TRO TAC1,SETADR			;that failed.
+	HRR TAC,TAC1
+	JRST FILL0
+;Funny MTAPE functions: EXAMINE, DEPOSIT, REG EXAM, REG DEP, PROGRAM START
+
+IFN CBOX <
+
+EXAMI:	PUSHJ	P,LDADR
+	POPJ	P,
+	MOVEI	DAT,HALT+CPHY+EXAM
+RDIT:	PUSHJ	P,WTW
+	POPJ	P,
+	PUSHJ	P,RDLGTS
+	POPJ	P,
+	XCTR	XW,[HLREM DAT,1(UUO)]
+	JRST	CPOPJ1
+
+REXAMI:	PUSHJ	P,LRADR
+	POPJ	P,
+	MOVEI	DAT,HALT+REXAM
+	JRST	RDIT
+
+DEPOS:	PUSHJ	P,LDADR
+	POPJ	P,
+	MOVEI	DAT,HALT+CPHY+DEP
+WRTIT:	XCTR	XR,[HRL DAT,1(UUO)]
+	PUSHJ	P,WTW
+	POPJ	P,
+
+RDLGTS:	MOVE	TAC,[XWD DOIT+SCHN,SETADR+SWREG]
+	TRZ	TAC1,SETADR
+	PUSHJ	P,SETCON
+	PUSHJ	P,RDW
+	POPJ	P,
+	TRNN	DAT,1
+	JRST	CPOPJ1
+	TRO	TEM,ADRERR
+	POPJ	P,
+
+RDEPOS:	PUSHJ	P,LRADR
+	POPJ	P,
+	MOVEI	DAT,HALT+RDEP
+	JRST	WRTIT
+
+LRADR:	MOVEI	DAT,CPHY+HALT+LADR
+	DPB	TAC1,[POINT 4,DAT,17]
+	JRST	ADRLOD
+
+LDADR:	MOVEI	DAT,CPHY+HALT+LADR
+	DPB	TAC1,[POINT 15,DAT,16]
+	LDB	TAC,[POINT 2,TAC1,20]
+	DPB	TAC,[POINT 2,DAT,16]
+ADRLOD:	MOVE	TAC,[XWD WRITE+TWOWD+DOIT+SCHN,SETADR+SWREG]
+	TLNE	TAC1,20
+	TLO	TAC,GRAB
+	JRST	WTW
+
+PSTART:	MOVEI	DAT,HALT+START
+	MOVE	TAC,[XWD WRITE+DOIT+SCHN,SETADR+FREG]
+	PUSHJ	P,WTW
+	POPJ	P,
+	PUSHJ	P,LDADR
+	POPJ	P,
+	MOVE	TAC,[XWD WRITE+DOIT+SCHN,SETADR+FREG]
+	MOVEI	DAT,START
+	PUSHJ	P,WTW
+	POPJ	P,
+	JRST	RDLGTS
+
+>;IFN CBOX
+;Read routines: RDB, RDW
+
+;Read a block.  Enter with initial CONO bits in TAC, user IOWD in DAT.
+;Skips on success, returns final CONI in TEM whether or not the read succeeded.
+
+RDB:	MOVE AC2,[XWD -NTRY,RDBR]	;Retry address = RDBR.
+	ADD DAT,[1,,0]			;Bugger the word count by one
+	PUSHJ P,RELIOW			;(the last word takes special handling).
+	JUMPGE DAT,RDBONE		;If only one word, don't do BLKO's
+RDB1:	PUSHJ P,DOCON			;Start the operation.
+RDB2:	CONSO D11,DONE			;Loop is CONSO, BLKI, JRST RDB2
+	JSP AC1,WDONE			;as long as no errors happen.
+	BLKI D11,DAT
+	JRST RDBE			;Exit for last word.
+	JRST RDB2
+
+RDBR:	PUSHJ P,UPDADR			;Retry in middle of block - update
+	JRST RDB1			;starting addresses.
+
+RDBER:	PUSHJ P,UPDADR			;Retry on last word -
+RDBONE:	PUSHJ P,DOCON			;restart the transfer.
+RDBE:	HRRI AC2,RDBER			;Last word: change retry address.
+	JSP AC1,WDONE			;wait for the read to finish,
+	CONI D11,TEM			;get the resulting status,
+	CONO D11,SETADR			;then set the bus adr to 0.
+	DATAI D11,1(DAT)		;Read the data.
+	JRST CPOPJ1
+
+;The DATAI makes the interface take another sequential read cycle and hang with
+;DONE on waiting for another DATAI.  Thus it stays active, and if GRAB is set
+;the bus stays grabbed.  We get the status in before the last DATAI for that
+;reason, and set the address to 0 to minimize the chance of errors in the dummy
+;cycle.
+
+;Read one word.  Enter with the CONO bits in TAC.  Returns the word read in DAT.
+;Skips on success, returns final CONI in TEM whether or not the read succeeded.
+
+RDW:	MOVE AC2,[XWD -NTRY,.+1]	;Set up retry address and count.
+	PUSHJ P,DOCON			;Start the read,
+	JSP AC1,WDONE			;wait for it.
+	CONI D11,TEM			;Same kind of terminal messing around
+	CONO D11,SETADR			;as at RDBE, for the same reason.
+	DATAI D11,DAT
+	JRST CPOPJ1
+;Write routines: WTB, WTW, POKE11
+
+;Write a block.  Same sequence as RDB.
+
+WTB:	MOVE AC2,[XWD -NTRY,WTBR]	;Retry address = WTBR.
+	PUSHJ P,RELIOW			;Get relocated IOWD.
+WTB1:	PUSHJ P,DOCON			;Start the operation.
+WTB2:	CONSO D11,DONE			;If we're lucky, the loop
+	JSP AC1,WDONE			;takes three instructions
+	BLKO D11,DAT			;(CONSO, BLKO, JRST).
+	JRST WTBE			;Ends like any other write.
+	JRST WTB2
+
+WTBR:	SUB DAT,[1,,1]			;Retry needed - back up the IOWD
+	PUSHJ P,UPDADR			;to the address that failed,
+	JRST WTB1			;update the starting address.
+
+;Change one or two words (POKE UUO).
+
+POKE11:	MOVSI TAC,WRITE+DOIT+SCHN	;Set up the CONO.
+	PUSHJ P,SETCON
+	XCTR XR,[MOVE DAT,1(UUO)]	;Get the data to poke him with,
+
+;Write one word.  Enter with CONO in TAC, word to send in DAT.
+;Same return convention as WTB.
+
+WTW:	MOVE AC2,[XWD -NTRY,.+1]	;Retry loc and counter.
+	PUSHJ P,DOCON			;Start the write, then
+	JSP AC1,WDONE			;when the interface is ready,
+	DATAO D11,DAT			;send the data.
+WTBE:	JSP AC1,WDONE			;Wait for it to finish and
+	CONI D11,TEM			;return the resulting CONI.
+	JRST CPOPJ1
+;Common subroutines for RDB and WTB: RELIOW, UPDADR
+
+;Common routine for updating the bus address for RDB and WTB in case of
+;a retry in the middle of a block.  This routine will not work if a block
+;wraps around core, but that should never happen.
+
+UPDADR:	SUB DAT,TAC1			;How many words were sent before the error?
+	JUMPE DAT,UPDAD2		;None means bypass a lot of screwing around.
+	HRLI AC2,-NTRY			;Otherwise, reset the retry counter.
+	ADDM DAT,UIOWD(DDB)		;Update the user's IOWD.
+	HRRZ AC3,DAT			;Now for the Unibus address...
+	TLNE TAC,TWOWDL			;in all modes except 0,
+	LSH AC3,1			;2 PDP-11 words per word.
+	ADD TAC,AC3
+UPDAD2:	ADD DAT,TAC1			;Get back the resultant IOWD.
+	TLNN TEM,NXM11			;If we were asleep from a Unibus INIT,
+	POPJ P,
+	SKIPA DAT,UIOWD(DDB)		;pick up the user's IOWD and relocate it.
+
+;Relocate a user IOWD in DAT.  Sets up TAC1 and UIOWD(DDB) in case of retry.
+
+RELIOW:	MOVEM DAT,UIOWD(DDB)		;Save the user's IOWD.
+	MOVEI TAC1,1(DAT)		;The first location involved...
+	PUSHJ P,RELOCA			;relocate it. (Clobbers AC1)
+	JRST UADRER			;Oops.
+	TLNN TAC,WRITE
+	JUMPL TAC1,UADRER		;Check for write protection.
+	HRRI DAT,-1(TAC1)		;Here's the relocated base address.
+	HLRE TAC1,DAT			;Now compute the ending address.
+	MOVM TAC1,TAC1
+	ADD TAC1,UIOWD(DDB)		;User's ending address
+	TLNN TAC,WRITE			;If reading,
+	ADDI TAC1,1			;unbugger the word count.
+	PUSHJ P,RELOCB			;Check that address. (uses ac1)
+	JRST UADRER
+	MOVE TAC1,DAT			;All happy.  Save the resulting IOWD.
+	POPJ P,
+;Common routines: WDONE, DOCON
+
+;Wait, error check, and retry routine.  Called with JSP AC1,WDONE
+
+WDONE:	CONSZ	D11,DONE		;If this bit is on,
+	JRST	(AC1)			;everything is happy.
+	MOVEI	AC3,=10			;We're going to delay a little while...
+WDONE1:	CONI	D11,TEM
+	TRNN	TEM,BUSY		;Until either BUSY goes off
+	JRST	WDONE2
+	SOJG	AC3,WDONE1		;or the time runs out.
+	CONO D11,IRESET+CLRINT+STOPIT	;It ran out.  Unhang the interface
+	JRST	WDONE4			;and retry.
+
+WDONE2:	TRNE TEM,DONE			;BUSY went off.  If DONE is on, we're OK.
+	JRST (AC1)			;Otherwise, an interrupt happened.
+IFE DBG11 <MOVE TEM,INTCNI(DDB)>	;Get the bits that caused the interrupt.
+IFN CBOX <	TRNE TEM,IREQ		;If it was requested by the 11,
+		JRST (AC2)>		;we get a free retry.
+	TRNE TEM,BUSTO
+	JRST WDONE5
+IFN NEWCNI <	TRNE TEM,NXM11
+		TRNN TEM,BINIT
+		CAIA>
+IFE NEWCNI <	TRNE TEM,NXM11>
+	TRNE IOS,NOTRY
+WDONE3:	POPJ P,
+	SOJ AC2,
+	AOBJP AC2,WDONE3
+	JRST DLAY
+
+WDONE4:	TRNE IOS,NOTRY
+	POPJ P,
+WDONE5:	SOJ AC2,
+	AOBJN AC2,1(AC2)
+	POPJ P,
+
+;This little routine does the CONO's to start a data transfer.
+
+DOCON:	CONO D11,(TAC)			;Set the bus address from RH(TAC),
+	HLR AC1,TAC
+IFN DBG11 <TRZ AC1,77>		;Don't enable PI's if debugging
+	CONO D11,(AC1)			;Start the operation from LH(TAC).
+	POPJ P,
+;	USET,SETCON, DLAY
+
+;Common routine for USET's
+
+USET:	XCTR XR,[MOVE TAC1,(UUO)]	;Falls into SETCON.
+
+;Routine to set the CONO and address bits, as for USETI
+;TAC contains old combination, TAC1 the changes.
+
+SETCON:	JUMPGE TAC1,SETC1
+	HLRZ AC1,TAC1
+	DPB AC1,[POINT 4,TAC,11]
+	TRNE AC1,20
+	TLO TAC,IGNPAR
+SETC1:	TRNE TAC1,400000
+	HRR TAC,TAC1
+	POPJ P,
+
+;Delay for one clock tick.  Call with JSP AC2,DLAY.  Clobbers AC1 and AC3.
+
+DLAY:
+IFN DBG11 <
+	MOVEI AC3,0
+	SLEEP AC3,
+>;IFN DBG11
+IFE DBG11 <
+	PUSH P,TAC
+	PUSH P,TAC1
+	PUSH P,AC2
+	PUSH P,TEM
+	MOVEI TAC,1
+	PUSHJ P,SLEEPT
+	POP P,TEM
+	POP P,AC2
+	POP P,TAC1
+	POP P,TAC
+>;IFE DBG11
+	JRST (AC2)
+
+BEND ELFSER
+>;IFN ELFNUM
